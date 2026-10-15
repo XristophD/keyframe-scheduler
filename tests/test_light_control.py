@@ -301,6 +301,9 @@ class LogicTest(unittest.TestCase):
         }
         self.assertEqual(group_members("light.room", attrs.get), ("light.a", "light.b"))
         self.assertEqual(group_members("light.single", attrs.get), ("light.single",))
+        # A Hue room reports its members as a set
+        hue = {"light.kuche": {"entity_id": {"light.vorne", "light.hinten"}, "is_hue_group": True}}
+        self.assertEqual(group_members("light.kuche", hue.get), ("light.hinten", "light.vorne"))
 
 
 class ControllerTest(unittest.TestCase):

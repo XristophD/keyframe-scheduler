@@ -286,6 +286,10 @@ def group_members(entity_id: str, get_attributes, depth: int = 0) -> Tuple[str, 
     """
     attrs: Optional[Dict[str, Any]] = get_attributes(entity_id)
     members = (attrs or {}).get("entity_id")
+    # A light group helper reports a list, a Hue room / zone a set (shown as
+    # a list in the API) — any collection of entity ids, in a fixed order
+    if isinstance(members, (set, frozenset)):
+        members = sorted(members)
     if depth > 5 or not isinstance(members, (list, tuple)) or not members:
         return (entity_id,)
     result = []

@@ -77,6 +77,8 @@ SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_UPLOAD_FROM_FILE = "upload_from_file"
 SERVICE_APPLY = "apply"
 SERVICE_SET_MANUAL_CONTROL = "set_manual_control"
+SERVICE_TURN_ON = "turn_on"
+SERVICE_TOGGLE = "toggle"
 
 # Service attributes
 ATTR_ENTRY_ID = "entry_id"

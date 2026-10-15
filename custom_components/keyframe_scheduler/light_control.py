@@ -38,8 +38,10 @@ from .const import (
     TURN_ON_TRANSITION_SECONDS,
 )
 from .light_logic import (
+    Command,
     LightProfile,
     SentCommand,
+    build_command,
     brightness_pct_from_state,
     group_members,
     is_manual_change,
@@ -162,6 +164,10 @@ class KeyframeLightController:
         self._unsub_state = async_track_state_change_event(
             self.hass, list(self._by_member), self._on_light_state_change
         )
+        # The follow switches show the members — write them out again
+        for light in self.lights.values():
+            if light.switch is not None:
+                light.switch.set_state(light.following, light.pause_reason)
 
     def register_switch(self, entity_id: str, switch) -> None:
         light = self.lights.get(entity_id)
@@ -265,6 +271,87 @@ class KeyframeLightController:
         _LOGGER.debug("%s: %s", member, service_data)
         await self.hass.services.async_call("light", "turn_on", service_data, blocking=False, context=context)
 
+    # ---- switching on with the schedule's values (services turn_on / toggle) --
+    #
+    # A light switched on with a plain light.turn_on / toggle comes on with its
+    # stored state and is corrected a second later — a visible jump. Switched
+    # on through these services it comes on with the schedule's values at once.
+
+    def light_for(self, entity_id: str) -> Optional[ControlledLight]:
+        """The assigned light (or light group) an entity belongs to."""
+        return self.lights.get(entity_id) or self._by_member.get(entity_id)
+
+    def _targets(self, light: ControlledLight, entity_id: str) -> tuple:
+        """The member lights a call for entity_id refers to."""
+        return light.members if entity_id == light.entity_id else (entity_id,)
+
+    def is_on(self, entity_id: str) -> bool:
+        light = self.light_for(entity_id)
+        targets = self._targets(light, entity_id) if light else (entity_id,)
+        return any((s := self.hass.states.get(t)) is not None and s.state == "on" for t in targets)
+
+    async def async_turn_on(self, entity_id: str, transition: float = TURN_ON_TRANSITION_SECONDS) -> None:
+        """Switch a light (or one member) on with the schedule's current values.
+
+        Switching on this way means "follow the schedule": a pause ends.
+        Every member gets what it can show (kelvin clamped to its range,
+        brightness only without colour temperature). If all members get the
+        same command, it goes to the group entity in one call — a Hue room or
+        a Zigbee group then switches all members at the same moment.
+        """
+        light = self.light_for(entity_id)
+        evaluator = getattr(self.coordinator, "evaluator", None)
+        if light is None or evaluator is None:
+            return
+        if not light.following:
+            light.following = True
+            light.pause_reason = None
+            light.paused_since = None
+            if light._resume_timer:
+                light._resume_timer()
+                light._resume_timer = None
+            if light.switch is not None:
+                light.switch.set_state(True, None)
+
+        now = self._now()
+        values = evaluator.evaluate_at(now)
+        commands: Dict[str, Command] = {}
+        for member in self._targets(light, entity_id):
+            state = self.hass.states.get(member)
+            kelvin_range = kelvin_range_from_state(state.attributes) if state else None
+            commands[member] = build_command(float(values.dim), float(values.kelvin), transition, kelvin_range)
+
+        distinct = set(commands.values())
+        calls = [(entity_id, next(iter(distinct)))] if len(commands) > 1 and len(distinct) == 1 else list(commands.items())
+        context = Context()
+        light.own_contexts.append(context.id)
+        for member, command in commands.items():
+            light.last_sent[member] = SentCommand(
+                at=now.timestamp(), brightness_pct=command.brightness_pct,
+                kelvin=command.kelvin, transition=command.transition,
+            )
+            self._schedule(light, member, max(1.0, command.transition, light.profile.min_interval))
+        for target, command in calls:
+            service_data: Dict[str, Any] = {
+                "entity_id": target,
+                "brightness_pct": command.brightness_pct,
+                "transition": command.transition,
+            }
+            if command.kelvin is not None:
+                service_data["color_temp_kelvin"] = command.kelvin
+            _LOGGER.debug("%s: turn on with the schedule: %s", target, service_data)
+            await self.hass.services.async_call("light", "turn_on", service_data, blocking=False, context=context)
+
+    async def async_toggle(self, entity_id: str, transition: Optional[float] = None) -> None:
+        """Off if any of the light's targets is on, otherwise on with the schedule."""
+        if self.is_on(entity_id):
+            service_data: Dict[str, Any] = {"entity_id": entity_id}
+            if transition is not None:
+                service_data["transition"] = transition
+            await self.hass.services.async_call("light", "turn_off", service_data, blocking=False, context=Context())
+            return
+        await self.async_turn_on(entity_id, TURN_ON_TRANSITION_SECONDS if transition is None else transition)
+
     def _schedule(self, light: ControlledLight, member: str, seconds: float) -> None:
         """Run the light's next step in `seconds`."""
         @callback
@@ -293,6 +380,13 @@ class KeyframeLightController:
             return
 
         if old is None or old.state != "on":
+            # Switched on by the turn_on / toggle service with the schedule's
+            # values: nothing to correct, its next step is already planned.
+            # (The member's state may carry a context of its own when the
+            # call went to the group entity — the fresh command tells.)
+            last = light.last_sent.get(entity_id)
+            if last is not None and self._now().timestamp() - last.at < last.transition + 5:
+                return
             # Switched on (app, wall switch, presence, power back ...):
             # off/on always ends a manual pause, then apply at once.
             if light.pause_reason == PAUSE_MANUAL:

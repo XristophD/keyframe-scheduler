@@ -125,12 +125,24 @@ Atributos: `transition_seconds` (tiempo de fundido hasta la siguiente actualizac
 
 | Servicio | Descripción |
 |----------|-------------|
+| `keyframe_scheduler.turn_on` | Encender luces **con los valores actuales del horario**: se encienden ya correctas en lugar de con su estado guardado y una corrección visible un segundo después. Cada luz recibe lo que puede mostrar; una luz en pausa vuelve a seguir el horario |
+| `keyframe_scheduler.toggle` | Como `light.toggle`, pero enciende con los valores del horario: el sustituto para pulsadores de pared |
 | `keyframe_scheduler.apply` | Enviar ya los valores actuales a las luces (opcionalmente una instancia / luces concretas) |
 | `keyframe_scheduler.set_manual_control` | Pausar luces (`manual: true`) o volver a seguir el horario (`manual: false`) |
 | `keyframe_scheduler.set_schedule` | Definir el horario como JSON |
 | `keyframe_scheduler.upload_from_file` | Cargar el horario desde un archivo en `/config/` |
 
 Un horario nuevo mediante `set_schedule` o `upload_from_file` se aplica de inmediato, sin recargar la integración.
+
+**Pulsadores de pared y automatizaciones de presencia:** usa `keyframe_scheduler.toggle` / `turn_on` en lugar de `light.toggle` / `light.turn_on`. Un grupo cuyos miembros reciben los mismos valores se conmuta en una sola llamada (una habitación Hue o un grupo Zigbee se enciende a la vez). Las luces encendidas fuera de Home Assistant (app Hue, regulador Hue, interruptores vinculados directamente en el bus) siguen encendiéndose con su estado guardado y se corrigen un segundo después.
+
+```yaml
+# Pulsador: alternar la cocina con los valores del horario
+actions:
+  - action: keyframe_scheduler.toggle
+    target:
+      entity_id: light.kuche
+```
 
 ---
 

@@ -125,12 +125,24 @@ Attributes: `transition_seconds` (fade time until the next update) and `keyframe
 
 | Service | Description |
 |---------|-------------|
+| `keyframe_scheduler.turn_on` | Switch lights on **with the schedule's current values** — they come on right instead of with their stored state and a visible correction a second later. Every light gets what it can show; a paused light follows again |
+| `keyframe_scheduler.toggle` | Like `light.toggle`, but switching on with the schedule's values — the drop-in for wall buttons |
 | `keyframe_scheduler.apply` | Send the current values to the lights now (optionally one instance / specific lights) |
 | `keyframe_scheduler.set_manual_control` | Pause lights (`manual: true`) or let them follow again (`manual: false`) |
 | `keyframe_scheduler.set_schedule` | Set the schedule as JSON |
 | `keyframe_scheduler.upload_from_file` | Load the schedule from a file under `/config/` |
 
 A new schedule via `set_schedule` or `upload_from_file` applies immediately, without reloading the integration.
+
+**Wall buttons and presence automations:** use `keyframe_scheduler.toggle` / `turn_on` instead of `light.toggle` / `light.turn_on`. A group whose members get the same values is switched in one call (a Hue room or Zigbee group comes on all at once). Lights switched on outside Home Assistant (Hue app, Hue dimmer, switches bound directly on the bus) still come on with their stored state and are corrected a second later.
+
+```yaml
+# Wall button: toggle the kitchen with the schedule's values
+actions:
+  - action: keyframe_scheduler.toggle
+    target:
+      entity_id: light.kuche
+```
 
 ---
 

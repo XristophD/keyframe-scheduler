@@ -33,6 +33,8 @@ from .const import (
     PLATFORMS,
     RESUME_NEVER,
     SERVICE_APPLY,
+    SERVICE_TOGGLE,
+    SERVICE_TURN_ON,
     SERVICE_SET_MANUAL_CONTROL,
     SERVICE_SET_SCHEDULE,
     SERVICE_UPLOAD_FROM_FILE,
@@ -664,10 +666,47 @@ def _async_register_services(hass: HomeAssistant) -> None:
         for controller, light_id in _controlled_entities(hass, call):
             controller.set_following(light_id, not manual, PAUSE_MANUAL if manual else None)
 
+    def _lights_by_controller(call: ServiceCall):
+        """(controller or None, entity_id) for every light of the call: the
+        instance whose light (or light group member) it is — None when no
+        instance controls it."""
+        wanted = call.data.get("entity_id") or []
+        if isinstance(wanted, str):
+            wanted = [wanted]
+        controllers = [
+            data["controller"] for data in hass.data[DOMAIN].values()
+            if isinstance(data, dict) and "controller" in data
+        ]
+        for entity_id in wanted:
+            yield next((c for c in controllers if c.light_for(entity_id) is not None), None), entity_id
+
+    async def handle_turn_on(call: ServiceCall) -> None:
+        """Switch lights on with the schedule's current values (a light no
+        instance controls is switched on normally)."""
+        transition = call.data.get("transition")
+        for controller, entity_id in _lights_by_controller(call):
+            if controller is None:
+                await hass.services.async_call("light", "turn_on", {"entity_id": entity_id}, blocking=False, context=call.context)
+            elif transition is None:
+                await controller.async_turn_on(entity_id)
+            else:
+                await controller.async_turn_on(entity_id, float(transition))
+
+    async def handle_toggle(call: ServiceCall) -> None:
+        """Off if on, otherwise on with the schedule's current values."""
+        transition = call.data.get("transition")
+        for controller, entity_id in _lights_by_controller(call):
+            if controller is None:
+                await hass.services.async_call("light", "toggle", {"entity_id": entity_id}, blocking=False, context=call.context)
+            else:
+                await controller.async_toggle(entity_id, None if transition is None else float(transition))
+
     hass.services.async_register(DOMAIN, SERVICE_SET_SCHEDULE, handle_set_schedule)
     hass.services.async_register(DOMAIN, SERVICE_UPLOAD_FROM_FILE, handle_upload_from_file)
     hass.services.async_register(DOMAIN, SERVICE_APPLY, handle_apply)
     hass.services.async_register(DOMAIN, SERVICE_SET_MANUAL_CONTROL, handle_set_manual_control)
+    hass.services.async_register(DOMAIN, SERVICE_TURN_ON, handle_turn_on)
+    hass.services.async_register(DOMAIN, SERVICE_TOGGLE, handle_toggle)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

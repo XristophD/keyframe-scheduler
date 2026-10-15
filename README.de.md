@@ -125,12 +125,24 @@ Attribute: `transition_seconds` (Überblendzeit bis zum nächsten Update) und `k
 
 | Dienst | Beschreibung |
 |--------|--------------|
+| `keyframe_scheduler.turn_on` | Leuchten **mit den aktuellen Werten des Zeitplans** einschalten – sie gehen gleich richtig an statt mit ihrem gespeicherten Zustand und einer sichtbaren Korrektur eine Sekunde später. Jede Leuchte bekommt, was sie darstellen kann; eine pausierte Leuchte folgt wieder |
+| `keyframe_scheduler.toggle` | Wie `light.toggle`, schaltet aber mit den Werten des Zeitplans ein – der Ersatz für Wandtaster |
 | `keyframe_scheduler.apply` | Aktuelle Werte sofort an die Leuchten senden (optional nur eine Instanz / bestimmte Leuchten) |
 | `keyframe_scheduler.set_manual_control` | Leuchten pausieren (`manual: true`) oder wieder folgen lassen (`manual: false`) |
 | `keyframe_scheduler.set_schedule` | Zeitplan als JSON setzen |
 | `keyframe_scheduler.upload_from_file` | Zeitplan aus einer Datei unter `/config/` laden |
 
 Ein neuer Zeitplan über `set_schedule` oder `upload_from_file` gilt sofort, ohne die Integration neu zu laden.
+
+**Wandtaster und Präsenz-Automationen:** `keyframe_scheduler.toggle` / `turn_on` statt `light.toggle` / `light.turn_on` verwenden. Eine Gruppe, deren Mitglieder dieselben Werte bekommen, wird in einem Aufruf geschaltet (ein Hue-Raum oder eine Zigbee-Gruppe geht gleichzeitig an). Leuchten, die außerhalb von Home Assistant eingeschaltet werden (Hue-App, Hue-Dimmschalter, direkt am Bus gebundene Schalter), gehen weiterhin mit ihrem gespeicherten Zustand an und werden eine Sekunde später korrigiert.
+
+```yaml
+# Wandtaster: Küche mit den Werten des Zeitplans umschalten
+actions:
+  - action: keyframe_scheduler.toggle
+    target:
+      entity_id: light.kuche
+```
 
 ---
 

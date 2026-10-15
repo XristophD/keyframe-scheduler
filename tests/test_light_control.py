@@ -380,6 +380,57 @@ class ControllerTest(unittest.TestCase):
         self.assertLess(commands["dali2_extended"], commands["dali"])
         self.assertLess(commands["zigbee"], commands["dali"])
 
+    # ---- services turn_on / toggle: switch on with the schedule's values ----
+
+    ROOM = {"light.room": ("off", {"entity_id": ["light.a", "light.b"], **CT}),
+            "light.a": ("off", CT), "light.b": ("off", CT)}
+
+    def test_turn_on_group_in_one_call_with_the_schedule(self):
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=self.ROOM)
+        hass.async_create_task(ctrl.async_turn_on("light.room"))
+        hass.run()
+        calls = turn_on_calls(hass)
+        # same command for both members -> one call to the group: all on at once
+        self.assertEqual(calls, [{"entity_id": "light.room", "brightness_pct": 33.3, "transition": 1,
+                                  "color_temp_kelvin": 3333}])
+        # the members report "on" (with a context of their own): no correction
+        for member in ("light.a", "light.b"):
+            hass.change_state(member, "on", {**CT, "brightness": 85, "color_temp_kelvin": 3333})
+        hass.run()
+        self.assertEqual(len(turn_on_calls(hass)), 1)
+        self.assertEqual(sorted(round(t[0]) for t in hass.timers), [10, 10])   # their next steps
+
+    def test_turn_on_mixed_group_per_member(self):
+        states = {"light.room": ("off", {"entity_id": ["light.ct", "light.dim"]}),
+                  "light.ct": ("off", {**CT, "min_color_temp_kelvin": 3500}),
+                  "light.dim": ("off", {"supported_color_modes": ["brightness"]})}
+        hass, coord, ctrl, _ = setup({"light.room": "zigbee"}, states=states)
+        hass.async_create_task(ctrl.async_turn_on("light.room", 0.5))
+        hass.run()
+        calls = {c["entity_id"]: c for c in turn_on_calls(hass)}
+        self.assertEqual(set(calls), {"light.ct", "light.dim"})
+        self.assertEqual(calls["light.ct"]["color_temp_kelvin"], 3500)          # clamped to its range
+        self.assertNotIn("color_temp_kelvin", calls["light.dim"])                # brightness only
+        self.assertEqual(calls["light.dim"]["transition"], 0.5)
+
+    def test_turn_on_one_member_and_resume(self):
+        hass, coord, ctrl, switches = setup({"light.room": "hue"}, states=self.ROOM)
+        ctrl.set_following("light.room", False, PAUSE_USER)
+        hass.async_create_task(ctrl.async_turn_on("light.b"))
+        hass.run()
+        self.assertEqual([c["entity_id"] for c in turn_on_calls(hass)], ["light.b"])
+        self.assertTrue(switches["light.room"].is_on)                            # follows again
+
+    def test_toggle(self):
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=self.ROOM)
+        hass.async_create_task(ctrl.async_toggle("light.room"))
+        hass.run()
+        self.assertEqual(turn_on_calls(hass)[-1]["entity_id"], "light.room")
+        hass.change_state("light.a", "on", CT)
+        hass.async_create_task(ctrl.async_toggle("light.room"))
+        hass.run()
+        self.assertEqual(hass.services.calls[-1][:3], ("light", "turn_off", {"entity_id": "light.room"}))
+
     def test_turn_on_applies_immediately(self):
         hass, coord, ctrl, _ = setup({"light.a": "zigbee"}, states={"light.a": ("off", CT)})
         self.assertEqual(turn_on_calls(hass), [])

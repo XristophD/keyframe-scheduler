@@ -85,3 +85,56 @@ set_manual_control:
       required: false
       selector:
         text:
+
+turn_on:
+  name: Turn on with the schedule
+  description: >
+    Switch lights on with the schedule's current values, so they come on
+    right instead of with their stored state and a correction a second later.
+    Use it in place of light.turn_on in automations (wall buttons, presence).
+    Every light gets what it can show; a paused light follows again. Lights
+    no instance controls are switched on normally.
+  fields:
+    entity_id:
+      name: Lights
+      description: Lights, light groups or members of an assigned group
+      required: true
+      selector:
+        entity:
+          domain: light
+          multiple: true
+    transition:
+      name: Transition
+      description: Fade when switching on, in seconds (default 1)
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 60
+          step: 0.5
+          unit_of_measurement: s
+
+toggle:
+  name: Toggle with the schedule
+  description: >
+    Off if the light (or any light of the group) is on, otherwise on with the
+    schedule's current values — the drop-in for light.toggle on a wall button.
+  fields:
+    entity_id:
+      name: Lights
+      description: Lights, light groups or members of an assigned group
+      required: true
+      selector:
+        entity:
+          domain: light
+          multiple: true
+    transition:
+      name: Transition
+      description: Fade in seconds (default 1 when switching on)
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 60
+          step: 0.5
+          unit_of_measurement: s

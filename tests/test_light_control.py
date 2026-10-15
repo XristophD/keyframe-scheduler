@@ -421,6 +421,20 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual([c["entity_id"] for c in turn_on_calls(hass)], ["light.b"])
         self.assertTrue(switches["light.room"].is_on)                            # follows again
 
+    def test_group_members_reported_late_are_picked_up(self):
+        # At start the group entity has no member list yet (its integration
+        # loads later) — it is controlled as a whole until the members show up
+        hass, coord, ctrl, switches = setup({"light.room": "hue"}, states={"light.room": ("off", CT)})
+        self.assertEqual(ctrl.lights["light.room"].members, ("light.room",))
+        hass.change_state("light.room", "off", {"entity_id": ["light.a", "light.b"], **CT})
+        self.assertEqual(ctrl.lights["light.room"].members, ("light.a", "light.b"))
+        self.assertEqual(switches["light.room"].is_on, True)
+        # members of a group that changed are found on the next schedule tick, too
+        hass.states.set("light.room", "off", {"entity_id": ["light.a"], **CT})
+        coord.update()
+        hass.run()
+        self.assertEqual(ctrl.lights["light.room"].members, ("light.a",))
+
     def test_toggle(self):
         hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=self.ROOM)
         hass.async_create_task(ctrl.async_toggle("light.room"))

@@ -8,7 +8,7 @@
 - Services `keyframe_scheduler.turn_on` and `keyframe_scheduler.toggle`: switch lights on with the schedule's current values, so they come on right instead of with their stored state and a visible correction a second later (e.g. a wall button automation with `light.toggle`). Per light: kelvin clamped to its range, brightness only without colour temperature; a group whose members get the same command is switched in one call (Hue room / Zigbee group: all at once); a paused light follows again; lights no instance controls are switched normally
 
 #### Fixed
-- Follow switch: the `members` attribute now shows the expanded group members (it kept the state from before the group was resolved)
+- Light groups whose members are reported only after start-up (a Hue room loads after the bridge) or change later are expanded again (on a schedule tick, a group state change, or `turn_on`); before, such a group stayed controlled as a whole. The follow switch's `members` attribute shows the expanded members
 
 ### [4.0.0] - 2026-10-08
 

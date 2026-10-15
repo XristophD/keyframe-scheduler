@@ -146,11 +146,20 @@ class KeyframeLightController:
         self._refresh_members()
         self.hass.async_create_task(self.async_apply(force=True))
 
+    def _group_attrs(self, entity_id: str):
+        state = self.hass.states.get(entity_id)
+        return dict(state.attributes) if state else None
+
+    def _refresh_members_if_changed(self) -> None:
+        """Groups report their members only once their integration has loaded
+        (a Hue room after the bridge, for example) and members can change —
+        expand again whenever the result would differ."""
+        if any(group_members(l.entity_id, self._group_attrs) != l.members for l in self.lights.values()):
+            self._refresh_members()
+
     def _refresh_members(self) -> None:
         """Expand groups and (re)subscribe to state changes of all members."""
-        def attrs(entity_id: str):
-            state = self.hass.states.get(entity_id)
-            return dict(state.attributes) if state else None
+        attrs = self._group_attrs
 
         self._by_member = {}
         for light in self.lights.values():
@@ -194,6 +203,7 @@ class KeyframeLightController:
     @callback
     def _on_schedule_update(self) -> None:
         self._check_resume_next_keyframe()
+        self._refresh_members_if_changed()
         # A new schedule (set_schedule, options): start over on its curve.
         # Otherwise only lights without a running timer need a step.
         evaluator = getattr(self.coordinator, "evaluator", None)
@@ -299,6 +309,7 @@ class KeyframeLightController:
         same command, it goes to the group entity in one call — a Hue room or
         a Zigbee group then switches all members at the same moment.
         """
+        self._refresh_members_if_changed()
         light = self.light_for(entity_id)
         evaluator = getattr(self.coordinator, "evaluator", None)
         if light is None or evaluator is None:
@@ -371,6 +382,8 @@ class KeyframeLightController:
         old = event.data.get("old_state")
         if light is None or new is None:
             return
+        if entity_id == light.entity_id and new.attributes.get("entity_id") is not None:
+            self._refresh_members_if_changed()   # a group reporting (new) members
 
         if new.state != "on":
             light.last_sent.pop(entity_id, None)  # next turn-on gets a fresh command

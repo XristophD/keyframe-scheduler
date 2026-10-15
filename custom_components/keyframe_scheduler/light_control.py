@@ -35,6 +35,7 @@ from .const import (
     RESUME_AFTER_MINUTES,
     RESUME_NEVER,
     RESUME_NEXT_KEYFRAME,
+    SWITCH_ON_TRANSITION_SECONDS,
     TURN_ON_TRANSITION_SECONDS,
 )
 from .light_logic import (
@@ -276,16 +277,22 @@ class KeyframeLightController:
         """Send commands to members of a light and remember them.
 
         All members of a group get the same command (the usual case: same
-        model, same curve) -> ONE call to the group entity: a Hue room or a
-        Zigbee group changes all lamps at the same moment instead of one
-        after the other. Otherwise one call per member.
+        model, same curve) -> ONE call to the group entity: a Zigbee group
+        changes all lamps at the same moment instead of one after the other.
+        Otherwise — and always for Hue rooms / zones — one call per member.
+        A transition of 0 is left out (switch at once).
         """
         if not commands:
             return
+        group_state = self.hass.states.get(light.entity_id)
         group_call = (
             light.entity_id not in light.members
             and set(commands) == set(light.members)
             and len(set(commands.values())) == 1
+            # Not for Hue rooms / zones: HA splits a room command into one
+            # request per lamp anyway, and a room command with a transition
+            # was measured to leave the lamps at a wrong brightness
+            and not (group_state is not None and group_state.attributes.get("is_hue_group"))
         )
         calls = [(light.entity_id, next(iter(commands.values())))] if group_call else list(commands.items())
         context = Context()
@@ -296,11 +303,9 @@ class KeyframeLightController:
                 kelvin=command.kelvin, transition=command.transition,
             )
         for target, command in calls:
-            service_data: Dict[str, Any] = {
-                "entity_id": target,
-                "brightness_pct": command.brightness_pct,
-                "transition": command.transition,
-            }
+            service_data: Dict[str, Any] = {"entity_id": target, "brightness_pct": command.brightness_pct}
+            if command.transition > 0:
+                service_data["transition"] = command.transition
             if command.kelvin is not None:
                 service_data["color_temp_kelvin"] = command.kelvin
             _LOGGER.debug("%s: %s", target, service_data)
@@ -325,14 +330,14 @@ class KeyframeLightController:
         targets = self._targets(light, entity_id) if light else (entity_id,)
         return any((s := self.hass.states.get(t)) is not None and s.state == "on" for t in targets)
 
-    async def async_turn_on(self, entity_id: str, transition: float = TURN_ON_TRANSITION_SECONDS) -> None:
+    async def async_turn_on(self, entity_id: str, transition: float = SWITCH_ON_TRANSITION_SECONDS) -> None:
         """Switch a light (or one member) on with the schedule's current values.
 
         Switching on this way means "follow the schedule": a pause ends.
         Every member gets what it can show (kelvin clamped to its range,
-        brightness only without colour temperature). If all members get the
-        same command, it goes to the group entity in one call — a Hue room or
-        a Zigbee group then switches all members at the same moment.
+        brightness only without colour temperature), without a fade by
+        default (SWITCH_ON_TRANSITION_SECONDS). If all members get the same
+        command, it goes to the group entity in one call (_send).
         """
         self._refresh_members_if_changed()
         light = self.light_for(entity_id)
@@ -368,7 +373,7 @@ class KeyframeLightController:
                 service_data["transition"] = transition
             await self.hass.services.async_call("light", "turn_off", service_data, blocking=False, context=Context())
             return
-        await self.async_turn_on(entity_id, TURN_ON_TRANSITION_SECONDS if transition is None else transition)
+        await self.async_turn_on(entity_id, SWITCH_ON_TRANSITION_SECONDS if transition is None else transition)
 
     def _schedule(self, light: ControlledLight, seconds: float) -> None:
         """Run the light's next step in `seconds` (one timer per assigned light)."""

@@ -105,7 +105,7 @@ turn_on:
           multiple: true
     transition:
       name: Transition
-      description: Fade when switching on, in seconds (default 1)
+      description: Fade when switching on, in seconds (default 0 — a fade from off is unreliable on some systems, e.g. Hue rooms)
       required: false
       selector:
         number:
@@ -130,7 +130,7 @@ toggle:
           multiple: true
     transition:
       name: Transition
-      description: Fade in seconds (default 1 when switching on)
+      description: Fade in seconds (default 0 when switching on)
       required: false
       selector:
         number:

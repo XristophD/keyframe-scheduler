@@ -391,8 +391,8 @@ class ControllerTest(unittest.TestCase):
         hass.run()
         calls = turn_on_calls(hass)
         # same command for both members -> one call to the group: all on at once
-        self.assertEqual(calls, [{"entity_id": "light.room", "brightness_pct": 33.3, "transition": 1,
-                                  "color_temp_kelvin": 3333}])
+        self.assertEqual(calls, [{"entity_id": "light.room", "brightness_pct": 33.3,
+                                  "color_temp_kelvin": 3333}])   # no fade when switching on
         # the members report "on" (with a context of their own): no correction
         for member in ("light.a", "light.b"):
             hass.change_state(member, "on", {**CT, "brightness": 85, "color_temp_kelvin": 3333})
@@ -423,6 +423,15 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(len(hass.timers), 1)
         hass.change_state("light.a", "off", CT)
         self.assertEqual(hass.timers, [])
+
+    def test_hue_room_gets_member_calls(self):
+        # A Hue room with a transition was measured to leave the lamps at a
+        # wrong brightness: Hue rooms are never sent one group command
+        hue_room = {**self.ROOM, "light.room": ("off", {"entity_id": ["light.a", "light.b"], "is_hue_group": True, **CT})}
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=hue_room)
+        hass.async_create_task(ctrl.async_turn_on("light.room"))
+        hass.run()
+        self.assertEqual(sorted(c["entity_id"] for c in turn_on_calls(hass)), ["light.a", "light.b"])
 
     def test_turn_on_mixed_group_per_member(self):
         states = {"light.room": ("off", {"entity_id": ["light.ct", "light.dim"]}),

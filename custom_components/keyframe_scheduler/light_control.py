@@ -191,11 +191,13 @@ class KeyframeLightController:
 
     # ---- sending ------------------------------------------------------------
     #
-    # Every light (every member of a group) runs on its own timer: a step
-    # sends at most one command — a fade along the curve, as long as the
-    # light's type allows — and schedules the next step for when that fade
-    # ends (light_logic.plan_step). Lights of different types in one instance
-    # therefore get different fades and command rates for the same curve.
+    # Every assigned light runs on its own timer (the members of a group share
+    # it): a step sends each member at most one command — a fade along the
+    # curve, as long as the light's type allows — and schedules the next step
+    # for when that fade ends (light_logic.plan_step). Lights of different
+    # types in one instance therefore get different fades and command rates
+    # for the same curve. Identical commands for all members of a group go
+    # out as one call to the group entity (_send).
 
     def _now(self) -> datetime:
         return dt_util.now()
@@ -224,21 +226,23 @@ class KeyframeLightController:
                 continue
             if not light.following:
                 continue
-            for member in light.members:
-                if not restart and not force and member in light._deferred:
-                    continue
-                await self._step(light, member, force, transition)
+            if not restart and not force and light._deferred:
+                continue
+            await self._step(light, force, transition)
 
-    async def _step(self, light: ControlledLight, member: str, force: bool = False,
+    async def _step(self, light: ControlledLight, force: bool = False,
                     catch_up: Optional[float] = None) -> None:
-        """One step for one light: send what the curve asks for now and set
-        the timer for the next step."""
-        cancel = light._deferred.pop(member, None)
-        if cancel:
-            cancel()
+        """One step for one assigned light: plan every member that is on (each
+        with its own capabilities), send, and set the light's timer for the
+        next step. The members of a group share one timer, so they stay in
+        step and their commands can go out together (_send)."""
+        self._cancel_step(light)
         evaluator = getattr(self.coordinator, "evaluator", None)
-        state = self.hass.states.get(member)
-        if evaluator is None or not light.following or state is None or state.state != "on":
+        if evaluator is None or not light.following:
+            return
+        states = {m: self.hass.states.get(m) for m in light.members}
+        on = [m for m, state in states.items() if state is not None and state.state == "on"]
+        if not on:
             return  # never switch a light on; a turn-on starts it again
 
         now = self._now()
@@ -248,38 +252,59 @@ class KeyframeLightController:
             return float(values.dim), float(values.kelvin)
 
         breakpoint_at = evaluator.next_breakpoint(now)
-        step = plan_step(
-            light.profile,
-            light.last_sent.get(member),
-            now.timestamp(),
-            curve,
-            None if breakpoint_at is None else (breakpoint_at - now).total_seconds(),
-            kelvin_range_from_state(state.attributes),
-            force=force,
-            catch_up=TURN_ON_TRANSITION_SECONDS if catch_up is None else catch_up,
-        )
-        self._schedule(light, member, step.next_in)
-        if step.action != "send":
-            return
+        to_breakpoint = None if breakpoint_at is None else (breakpoint_at - now).total_seconds()
+        sends: Dict[str, Command] = {}
+        next_in = None
+        for member in on:
+            step = plan_step(
+                light.profile,
+                light.last_sent.get(member),
+                now.timestamp(),
+                curve,
+                to_breakpoint,
+                kelvin_range_from_state(states[member].attributes),
+                force=force,
+                catch_up=TURN_ON_TRANSITION_SECONDS if catch_up is None else catch_up,
+            )
+            next_in = step.next_in if next_in is None else min(next_in, step.next_in)
+            if step.action == "send":
+                sends[member] = step.command
+        self._schedule(light, next_in)
+        await self._send(light, sends, now)
 
-        command = step.command
-        service_data: Dict[str, Any] = {
-            "entity_id": member,
-            "brightness_pct": command.brightness_pct,
-            "transition": command.transition,
-        }
-        if command.kelvin is not None:
-            service_data["color_temp_kelvin"] = command.kelvin
+    async def _send(self, light: ControlledLight, commands: Dict[str, Command], now: datetime) -> None:
+        """Send commands to members of a light and remember them.
+
+        All members of a group get the same command (the usual case: same
+        model, same curve) -> ONE call to the group entity: a Hue room or a
+        Zigbee group changes all lamps at the same moment instead of one
+        after the other. Otherwise one call per member.
+        """
+        if not commands:
+            return
+        group_call = (
+            light.entity_id not in light.members
+            and set(commands) == set(light.members)
+            and len(set(commands.values())) == 1
+        )
+        calls = [(light.entity_id, next(iter(commands.values())))] if group_call else list(commands.items())
         context = Context()
         light.own_contexts.append(context.id)
-        light.last_sent[member] = SentCommand(
-            at=now.timestamp(),
-            brightness_pct=command.brightness_pct,
-            kelvin=command.kelvin,
-            transition=command.transition,
-        )
-        _LOGGER.debug("%s: %s", member, service_data)
-        await self.hass.services.async_call("light", "turn_on", service_data, blocking=False, context=context)
+        for member, command in commands.items():
+            light.last_sent[member] = SentCommand(
+                at=now.timestamp(), brightness_pct=command.brightness_pct,
+                kelvin=command.kelvin, transition=command.transition,
+            )
+        for target, command in calls:
+            service_data: Dict[str, Any] = {
+                "entity_id": target,
+                "brightness_pct": command.brightness_pct,
+                "transition": command.transition,
+            }
+            if command.kelvin is not None:
+                service_data["color_temp_kelvin"] = command.kelvin
+            _LOGGER.debug("%s: %s", target, service_data)
+            await self.hass.services.async_call("light", "turn_on", service_data, blocking=False, context=context)
 
     # ---- switching on with the schedule's values (services turn_on / toggle) --
     #
@@ -332,26 +357,8 @@ class KeyframeLightController:
             kelvin_range = kelvin_range_from_state(state.attributes) if state else None
             commands[member] = build_command(float(values.dim), float(values.kelvin), transition, kelvin_range)
 
-        distinct = set(commands.values())
-        calls = [(entity_id, next(iter(distinct)))] if len(commands) > 1 and len(distinct) == 1 else list(commands.items())
-        context = Context()
-        light.own_contexts.append(context.id)
-        for member, command in commands.items():
-            light.last_sent[member] = SentCommand(
-                at=now.timestamp(), brightness_pct=command.brightness_pct,
-                kelvin=command.kelvin, transition=command.transition,
-            )
-            self._schedule(light, member, max(1.0, command.transition, light.profile.min_interval))
-        for target, command in calls:
-            service_data: Dict[str, Any] = {
-                "entity_id": target,
-                "brightness_pct": command.brightness_pct,
-                "transition": command.transition,
-            }
-            if command.kelvin is not None:
-                service_data["color_temp_kelvin"] = command.kelvin
-            _LOGGER.debug("%s: turn on with the schedule: %s", target, service_data)
-            await self.hass.services.async_call("light", "turn_on", service_data, blocking=False, context=context)
+        self._schedule(light, max(1.0, transition, light.profile.min_interval))
+        await self._send(light, commands, now)
 
     async def async_toggle(self, entity_id: str, transition: Optional[float] = None) -> None:
         """Off if any of the light's targets is on, otherwise on with the schedule."""
@@ -363,14 +370,22 @@ class KeyframeLightController:
             return
         await self.async_turn_on(entity_id, TURN_ON_TRANSITION_SECONDS if transition is None else transition)
 
-    def _schedule(self, light: ControlledLight, member: str, seconds: float) -> None:
-        """Run the light's next step in `seconds`."""
+    def _schedule(self, light: ControlledLight, seconds: float) -> None:
+        """Run the light's next step in `seconds` (one timer per assigned light)."""
+        self._cancel_step(light)
+
         @callback
         def _later(_now) -> None:
-            light._deferred.pop(member, None)
-            self.hass.async_create_task(self._step(light, member))
+            light._deferred.pop(light.entity_id, None)
+            self.hass.async_create_task(self._step(light))
 
-        light._deferred[member] = async_call_later(self.hass, max(1.0, seconds), _later)
+        light._deferred[light.entity_id] = async_call_later(self.hass, max(1.0, seconds), _later)
+
+    @staticmethod
+    def _cancel_step(light: ControlledLight) -> None:
+        cancel = light._deferred.pop(light.entity_id, None)
+        if cancel:
+            cancel()
 
     # ---- watching the lights -------------------------------------------------
 
@@ -387,9 +402,9 @@ class KeyframeLightController:
 
         if new.state != "on":
             light.last_sent.pop(entity_id, None)  # next turn-on gets a fresh command
-            cancel = light._deferred.pop(entity_id, None)
-            if cancel:
-                cancel()
+            # The light's timer stops once none of its members is on
+            if not any((s := self.hass.states.get(m)) is not None and s.state == "on" for m in light.members):
+                self._cancel_step(light)
             return
 
         if old is None or old.state != "on":

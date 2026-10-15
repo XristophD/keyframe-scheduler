@@ -398,7 +398,31 @@ class ControllerTest(unittest.TestCase):
             hass.change_state(member, "on", {**CT, "brightness": 85, "color_temp_kelvin": 3333})
         hass.run()
         self.assertEqual(len(turn_on_calls(hass)), 1)
-        self.assertEqual(sorted(round(t[0]) for t in hass.timers), [10, 10])   # their next steps
+        self.assertEqual([round(t[0]) for t in hass.timers], [10])   # the group's next step
+
+    def test_group_follows_the_curve_with_one_call(self):
+        # Steady state: same model, same curve -> one call to the group each step
+        clock = Clock(7, 10)
+        on = {"light.room": ("on", {"entity_id": ["light.a", "light.b"], **CT}),
+              "light.a": ("on", CT), "light.b": ("on", CT)}
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, clock=clock, states=on)
+        self.assertEqual([c["entity_id"] for c in turn_on_calls(hass)], ["light.room"])
+        clock.advance(10)
+        fire_timer(hass, 10)
+        calls = turn_on_calls(hass)
+        self.assertEqual([c["entity_id"] for c in calls], ["light.room", "light.room"])
+        self.assertEqual(calls[-1]["transition"], 600)
+        self.assertEqual(len(hass.timers), 1)
+
+    def test_group_partly_on_gets_member_calls(self):
+        partly = {"light.room": ("on", {"entity_id": ["light.a", "light.b"], **CT}),
+                  "light.a": ("on", CT), "light.b": ("off", CT)}
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=partly)
+        self.assertEqual([c["entity_id"] for c in turn_on_calls(hass)], ["light.a"])
+        # the last member off stops the group's timer
+        self.assertEqual(len(hass.timers), 1)
+        hass.change_state("light.a", "off", CT)
+        self.assertEqual(hass.timers, [])
 
     def test_turn_on_mixed_group_per_member(self):
         states = {"light.room": ("off", {"entity_id": ["light.ct", "light.dim"]}),

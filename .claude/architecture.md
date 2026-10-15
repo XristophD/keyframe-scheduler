@@ -44,8 +44,11 @@ export JSON  ──────────────────────�
 
 ## Light control
 
-- **Sending:** every light (every group member that is ON) runs on its own
-  timer, independent of the coordinator and of the other lights. A step
+- **Sending:** every assigned light runs on its own timer, independent of
+  the coordinator and of the other lights; the members of a group share it.
+  Identical commands for all members of a group (all ON) go out as one call
+  to the group entity (Hue room / Zigbee group: all lamps at once), else one
+  call per member. A step
   (`plan_step`) fades to the curve's value at the END of the piece: at most the
   type's `max_transition` long, never across a breakpoint
   (`Evaluator.next_breakpoint`: keyframe time, transition start/end), halved

@@ -148,3 +148,86 @@ class WebsocketSchedulesTest(unittest.TestCase):
         self.assertEqual(msg_id, 7)
         self.assertEqual([(s["entry_id"], s["title"], s["schedule"]["name"]) for s in result["schedules"]],
                          [("a", "Astro Light", "Astro"), ("b", "Flur", "from store")])
+
+
+class SaveScheduleTest(unittest.TestCase):
+    """keyframe_scheduler/save_schedule: the web app saves a schedule into an
+    instance — active at once, kept across restarts, no reload."""
+
+    def setUp(self):
+        import keyframe_scheduler as ks
+        self.ks = ks
+        test = self
+
+        class Entry:
+            domain = ks.DOMAIN
+            entry_id, title = "a", "Astro Light"
+            options = {"schedule_json": '{"version": 1, "keyframes": []}', "lights": {"light.x": "hue"}}
+
+        class Entries:
+            def __init__(self):
+                self.updates = []
+
+            def async_get_entry(self, entry_id):
+                return test.entry if entry_id == "a" else None
+
+            def async_update_entry(self, entry, options):
+                self.updates.append(options)
+                entry.options = options
+
+            async def async_reload(self, entry_id):
+                test.reloads.append(entry_id)
+
+        class Store:
+            def __init__(self):
+                self.saved = {}
+
+            async def async_set(self, entry_id, schedule):
+                self.saved[entry_id] = schedule
+
+        class Coordinator:
+            async def async_set_schedule(self, evaluator, spec):
+                test.activated.append(spec)
+
+        class Hass:
+            config = type("Config", (), {"latitude": 52.5, "longitude": 13.4})()
+
+        self.entry = Entry()
+        self.reloads, self.activated = [], []
+        self.hass = Hass()
+        self.hass.config_entries = Entries()
+        self.hass.data = {ks.DOMAIN: {"store": Store(), "a": {"coordinator": Coordinator()}}}
+
+    def call(self, msg):
+        class Connection:
+            result = error = None
+
+            def send_result(self, msg_id, result):
+                self.result = result
+
+            def send_error(self, msg_id, code, message):
+                self.error = (code, message)
+
+        connection = Connection()
+        asyncio.run(self.ks._ws_save_schedule(self.hass, connection, {"id": 1, **msg}))
+        return connection
+
+    def test_saves_activates_and_keeps_it_across_restarts(self):
+        schedule = {"version": 1, "name": "Neu", "keyframes": [{"time": "07:00", "kelvin": 4000, "dim": 80, "mode": "instant"}]}
+        connection = self.call({"entry_id": "a", "schedule": schedule})
+        self.assertEqual(connection.result, {"entry_id": "a", "title": "Astro Light"})
+        self.assertEqual(self.hass.data[self.ks.DOMAIN]["store"].saved["a"], schedule)   # store
+        self.assertEqual(len(self.activated), 1)                                            # active at once
+        self.assertIn('"name": "Neu"', self.entry.options["schedule_json"])                 # survives a restart
+        self.assertEqual(self.entry.options["lights"], {"light.x": "hue"})                  # rest of the options kept
+        # the options update does not reload the instance
+        asyncio.run(self.ks._async_update_listener(self.hass, self.entry))
+        self.assertEqual(self.reloads, [])
+        asyncio.run(self.ks._async_update_listener(self.hass, self.entry))                  # a later real change does
+        self.assertEqual(self.reloads, ["a"])
+
+    def test_invalid_schedule_and_unknown_instance(self):
+        bad = self.call({"entry_id": "a", "schedule": {"version": 1, "timezone": "Mars/Olympus", "keyframes": []}})
+        self.assertEqual(bad.error[0], "invalid_schedule")
+        self.assertEqual(self.hass.config_entries.updates, [])
+        self.assertEqual(self.call({"entry_id": "zzz", "schedule": {"version": 1, "keyframes": []}}).error[0], "not_found")

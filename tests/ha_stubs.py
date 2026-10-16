@@ -83,6 +83,7 @@ def _install():
     module("homeassistant.components.websocket_api",
            websocket_command=lambda schema: (lambda func: func),
            async_response=lambda func: func,
+           require_admin=lambda func: func,
            async_register_command=lambda hass, handler: None)
     sys.modules["homeassistant.components"].websocket_api = sys.modules["homeassistant.components.websocket_api"]
     module("homeassistant.components.http", StaticPathConfig=object)

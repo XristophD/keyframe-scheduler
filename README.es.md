@@ -161,7 +161,7 @@ En cuanto se crea la primera instancia (paso 1), **Keyframe Scheduler** aparece 
 
 Idiomas disponibles: DE / EN / ES
 
-Abierta desde la barra lateral, la lista de ejemplos ofrece también los **horarios de tus instancias** (grupo *Home Assistant*): elige uno para cargarlo y editarlo, y guárdalo de nuevo con *Configurar* o `set_schedule`.
+Abierta desde la barra lateral, la lista de ejemplos ofrece también los **horarios de tus instancias** (grupo *Home Assistant*): elige uno para cargarlo y editarlo; **Guardar en instancia** (Exportar e importar) lo escribe de vuelta: validado, activo de inmediato y conservado tras reinicios (solo administradores).
 
 ### Exportación para PICO lightnode
 

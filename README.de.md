@@ -161,7 +161,7 @@ Sobald die erste Instanz angelegt ist (Schritt 1), erscheint **Keyframe Schedule
 
 Verfügbare Sprachen: DE / EN / ES
 
-Über die Seitenleiste geöffnet, bietet die Beispielliste auch die **Zeitpläne deiner Instanzen** an (Gruppe *Home Assistant*) – auswählen, laden und bearbeiten, dann über *Konfigurieren* oder `set_schedule` zurückspeichern.
+Über die Seitenleiste geöffnet, bietet die Beispielliste auch die **Zeitpläne deiner Instanzen** an (Gruppe *Home Assistant*) – auswählen, laden und bearbeiten, dann schreibt **In Instanz speichern** (Export & Import) ihn direkt zurück: geprüft, sofort aktiv und über Neustarts hinweg erhalten (nur Admins).
 
 ### Export für PICO lightnode
 

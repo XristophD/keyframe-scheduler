@@ -63,6 +63,10 @@ KELVIN_TOLERANCE = 150
 TRANSITION_GRACE_SECONDS = 10
 # Fade used when a light is switched on (or following is re-enabled)
 TURN_ON_TRANSITION_SECONDS = 1
+# Fade when the turn_on / toggle services switch a light on from off: none.
+# A fade from off is unreliable on some systems — a Hue room switched on with
+# a transition was measured to stop at 6-12 % instead of the target.
+SWITCH_ON_TRANSITION_SECONDS = 0
 # A fade is a straight line: on a curved stretch (sine) it may leave the
 # curve by at most this much — otherwise the stretch is split further
 SEGMENT_BRIGHTNESS_TOLERANCE_PCT = 1.0
@@ -77,6 +81,8 @@ SERVICE_SET_SCHEDULE = "set_schedule"
 SERVICE_UPLOAD_FROM_FILE = "upload_from_file"
 SERVICE_APPLY = "apply"
 SERVICE_SET_MANUAL_CONTROL = "set_manual_control"
+SERVICE_TURN_ON = "turn_on"
+SERVICE_TOGGLE = "toggle"
 
 # Service attributes
 ATTR_ENTRY_ID = "entry_id"

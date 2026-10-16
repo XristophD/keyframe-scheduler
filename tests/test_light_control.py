@@ -301,6 +301,9 @@ class LogicTest(unittest.TestCase):
         }
         self.assertEqual(group_members("light.room", attrs.get), ("light.a", "light.b"))
         self.assertEqual(group_members("light.single", attrs.get), ("light.single",))
+        # A Hue room reports its members as a set
+        hue = {"light.kuche": {"entity_id": {"light.vorne", "light.hinten"}, "is_hue_group": True}}
+        self.assertEqual(group_members("light.kuche", hue.get), ("light.hinten", "light.vorne"))
 
 
 class ControllerTest(unittest.TestCase):
@@ -379,6 +382,104 @@ class ControllerTest(unittest.TestCase):
         # Longer fades mean fewer commands for the same curve
         self.assertLess(commands["dali2_extended"], commands["dali"])
         self.assertLess(commands["zigbee"], commands["dali"])
+
+    # ---- services turn_on / toggle: switch on with the schedule's values ----
+
+    ROOM = {"light.room": ("off", {"entity_id": ["light.a", "light.b"], **CT}),
+            "light.a": ("off", CT), "light.b": ("off", CT)}
+
+    def test_turn_on_group_in_one_call_with_the_schedule(self):
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=self.ROOM)
+        hass.async_create_task(ctrl.async_turn_on("light.room"))
+        hass.run()
+        calls = turn_on_calls(hass)
+        # same command for both members -> one call to the group: all on at once
+        self.assertEqual(calls, [{"entity_id": "light.room", "brightness_pct": 33.3,
+                                  "color_temp_kelvin": 3333}])   # no fade when switching on
+        # the members report "on" (with a context of their own): no correction
+        for member in ("light.a", "light.b"):
+            hass.change_state(member, "on", {**CT, "brightness": 85, "color_temp_kelvin": 3333})
+        hass.run()
+        self.assertEqual(len(turn_on_calls(hass)), 1)
+        self.assertEqual([round(t[0]) for t in hass.timers], [10])   # the group's next step
+
+    def test_group_follows_the_curve_with_one_call(self):
+        # Steady state: same model, same curve -> one call to the group each step
+        clock = Clock(7, 10)
+        on = {"light.room": ("on", {"entity_id": ["light.a", "light.b"], **CT}),
+              "light.a": ("on", CT), "light.b": ("on", CT)}
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, clock=clock, states=on)
+        self.assertEqual([c["entity_id"] for c in turn_on_calls(hass)], ["light.room"])
+        clock.advance(10)
+        fire_timer(hass, 10)
+        calls = turn_on_calls(hass)
+        self.assertEqual([c["entity_id"] for c in calls], ["light.room", "light.room"])
+        self.assertEqual(calls[-1]["transition"], 600)
+        self.assertEqual(len(hass.timers), 1)
+
+    def test_group_partly_on_gets_member_calls(self):
+        partly = {"light.room": ("on", {"entity_id": ["light.a", "light.b"], **CT}),
+                  "light.a": ("on", CT), "light.b": ("off", CT)}
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=partly)
+        self.assertEqual([c["entity_id"] for c in turn_on_calls(hass)], ["light.a"])
+        # the last member off stops the group's timer
+        self.assertEqual(len(hass.timers), 1)
+        hass.change_state("light.a", "off", CT)
+        self.assertEqual(hass.timers, [])
+
+    def test_hue_room_gets_member_calls(self):
+        # A Hue room with a transition was measured to leave the lamps at a
+        # wrong brightness: Hue rooms are never sent one group command
+        hue_room = {**self.ROOM, "light.room": ("off", {"entity_id": ["light.a", "light.b"], "is_hue_group": True, **CT})}
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=hue_room)
+        hass.async_create_task(ctrl.async_turn_on("light.room"))
+        hass.run()
+        self.assertEqual(sorted(c["entity_id"] for c in turn_on_calls(hass)), ["light.a", "light.b"])
+
+    def test_turn_on_mixed_group_per_member(self):
+        states = {"light.room": ("off", {"entity_id": ["light.ct", "light.dim"]}),
+                  "light.ct": ("off", {**CT, "min_color_temp_kelvin": 3500}),
+                  "light.dim": ("off", {"supported_color_modes": ["brightness"]})}
+        hass, coord, ctrl, _ = setup({"light.room": "zigbee"}, states=states)
+        hass.async_create_task(ctrl.async_turn_on("light.room", 0.5))
+        hass.run()
+        calls = {c["entity_id"]: c for c in turn_on_calls(hass)}
+        self.assertEqual(set(calls), {"light.ct", "light.dim"})
+        self.assertEqual(calls["light.ct"]["color_temp_kelvin"], 3500)          # clamped to its range
+        self.assertNotIn("color_temp_kelvin", calls["light.dim"])                # brightness only
+        self.assertEqual(calls["light.dim"]["transition"], 0.5)
+
+    def test_turn_on_one_member_and_resume(self):
+        hass, coord, ctrl, switches = setup({"light.room": "hue"}, states=self.ROOM)
+        ctrl.set_following("light.room", False, PAUSE_USER)
+        hass.async_create_task(ctrl.async_turn_on("light.b"))
+        hass.run()
+        self.assertEqual([c["entity_id"] for c in turn_on_calls(hass)], ["light.b"])
+        self.assertTrue(switches["light.room"].is_on)                            # follows again
+
+    def test_group_members_reported_late_are_picked_up(self):
+        # At start the group entity has no member list yet (its integration
+        # loads later) — it is controlled as a whole until the members show up
+        hass, coord, ctrl, switches = setup({"light.room": "hue"}, states={"light.room": ("off", CT)})
+        self.assertEqual(ctrl.lights["light.room"].members, ("light.room",))
+        hass.change_state("light.room", "off", {"entity_id": ["light.a", "light.b"], **CT})
+        self.assertEqual(ctrl.lights["light.room"].members, ("light.a", "light.b"))
+        self.assertEqual(switches["light.room"].is_on, True)
+        # members of a group that changed are found on the next schedule tick, too
+        hass.states.set("light.room", "off", {"entity_id": ["light.a"], **CT})
+        coord.update()
+        hass.run()
+        self.assertEqual(ctrl.lights["light.room"].members, ("light.a",))
+
+    def test_toggle(self):
+        hass, coord, ctrl, _ = setup({"light.room": "hue"}, states=self.ROOM)
+        hass.async_create_task(ctrl.async_toggle("light.room"))
+        hass.run()
+        self.assertEqual(turn_on_calls(hass)[-1]["entity_id"], "light.room")
+        hass.change_state("light.a", "on", CT)
+        hass.async_create_task(ctrl.async_toggle("light.room"))
+        hass.run()
+        self.assertEqual(hass.services.calls[-1][:3], ("light", "turn_off", {"entity_id": "light.room"}))
 
     def test_turn_on_applies_immediately(self):
         hass, coord, ctrl, _ = setup({"light.a": "zigbee"}, states={"light.a": ("off", CT)})

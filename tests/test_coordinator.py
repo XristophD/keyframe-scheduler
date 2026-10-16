@@ -113,3 +113,38 @@ class UpdateDataTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebsocketSchedulesTest(unittest.TestCase):
+    """keyframe_scheduler/schedules: the web app lists the active schedule of
+    every instance in its example list."""
+
+    def test_lists_every_instance(self):
+        import keyframe_scheduler as ks
+
+        class Entry:
+            def __init__(self, entry_id, title):
+                self.entry_id, self.title = entry_id, title
+
+        class Store:
+            async def async_get(self, entry_id):
+                return {"version": 1, "name": "from store", "keyframes": []} if entry_id == "b" else None
+
+        class Entries:
+            def async_entries(self, domain):
+                return [Entry("a", "Astro Light"), Entry("b", "Flur"), Entry("c", "Empty")]
+
+        class Hass:
+            config_entries = Entries()
+            data = {ks.DOMAIN: {"store": Store(), "a": {"schedule": {"version": 1, "name": "Astro", "keyframes": []}}}}
+
+        class Connection:
+            def send_result(self, msg_id, result):
+                self.sent = (msg_id, result)
+
+        connection = Connection()
+        asyncio.run(ks._ws_schedules(Hass(), connection, {"id": 7, "type": "keyframe_scheduler/schedules"}))
+        msg_id, result = connection.sent
+        self.assertEqual(msg_id, 7)
+        self.assertEqual([(s["entry_id"], s["title"], s["schedule"]["name"]) for s in result["schedules"]],
+                         [("a", "Astro Light", "Astro"), ("b", "Flur", "from store")])

@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from homeassistant.components import frontend
+from homeassistant.components import frontend, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -540,6 +540,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     _async_register_services(hass)
+    _async_register_websocket(hass)
 
     # Reload when options change (lights, types, resume mode, schedule)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -584,6 +585,31 @@ def _controlled_entities(hass: HomeAssistant, call: ServiceCall):
         for light_id in controller.lights:
             if not wanted or light_id in wanted:
                 yield controller, light_id
+
+
+@websocket_api.websocket_command({"type": "keyframe_scheduler/schedules"})
+@websocket_api.async_response
+async def _ws_schedules(hass: HomeAssistant, connection, msg: Dict[str, Any]) -> None:
+    """The active schedule of every instance, for the web app's example list:
+    {"schedules": [{"entry_id", "title", "schedule"}]}."""
+    store = hass.data.get(DOMAIN, {}).get("store")
+    schedules = []
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        schedule = data.get("schedule") if isinstance(data, dict) else None
+        if not schedule and store is not None:
+            schedule = await store.async_get(entry.entry_id)
+        if schedule:
+            schedules.append({"entry_id": entry.entry_id, "title": entry.title, "schedule": schedule})
+    connection.send_result(msg["id"], {"schedules": schedules})
+
+
+def _async_register_websocket(hass: HomeAssistant) -> None:
+    """Register the web app's websocket command once."""
+    if hass.data[DOMAIN].get("ws_registered"):
+        return
+    websocket_api.async_register_command(hass, _ws_schedules)
+    hass.data[DOMAIN]["ws_registered"] = True
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
@@ -728,7 +754,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
 
         # Remove panel when the last config entry is removed
-        _meta_keys = {"store", "static_path_registered", "panel_registered"}
+        _meta_keys = {"store", "static_path_registered", "panel_registered", "ws_registered"}
         remaining_entries = [k for k in hass.data[DOMAIN] if k not in _meta_keys]
         if not remaining_entries and hass.data[DOMAIN].pop("panel_registered", False):
             try:

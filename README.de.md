@@ -161,6 +161,8 @@ Sobald die erste Instanz angelegt ist (Schritt 1), erscheint **Keyframe Schedule
 
 Verfügbare Sprachen: DE / EN / ES
 
+Über die Seitenleiste geöffnet, bietet die Beispielliste auch die **Zeitpläne deiner Instanzen** an (Gruppe *Home Assistant*) – auswählen, laden und bearbeiten, dann über *Konfigurieren* oder `set_schedule` zurückspeichern.
+
 ### Export für PICO lightnode
 
 **PICO DailyScheduler** (Export & Import) erzeugt das `DAILYSCHEDULER`-Behavior für das `setup.json` eines PICO lightnode: in die `behaviors` eines Targets mit Space `TC` einfügen. Targets, Adjust-/Override-Behaviors und Destinations bleiben im Setup; Koordinaten und Zeitzone kommen aus der PICO-Konfiguration (`pico.latitude` / `pico.longitude`).

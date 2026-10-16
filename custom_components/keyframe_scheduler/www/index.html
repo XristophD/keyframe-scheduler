@@ -527,9 +527,12 @@
         <button class="lkl-btn" id="sortByTimeBtn">Nach Zeit sortieren</button>
         <select class="lkl-select preset-select" id="presetSelect" aria-label="Beispiel laden">
           <option value="" id="opt-preset-none">Beispiel laden …</option>
-          <option value="time" id="opt-preset-time">Büroprofil Lichtdusche</option>
-          <option value="sun" id="opt-preset-sun">Reine Astrosteuerung</option>
-          <option value="mixed" id="opt-preset-mixed">Gemischt (Überlappung in Berlin)</option>
+          <optgroup id="preset-group-examples" label="Beispiele">
+            <option value="time" id="opt-preset-time">Büroprofil Lichtdusche</option>
+            <option value="sun" id="opt-preset-sun">Reine Astrosteuerung</option>
+            <option value="mixed" id="opt-preset-mixed">Gemischt (Überlappung in Berlin)</option>
+          </optgroup>
+          <!-- "Home Assistant" group with the instances' schedules: renderHaSchedules() -->
         </select>
         <button class="lkl-btn" id="loadFileBtn">Datei laden</button>
       </div>
@@ -1399,6 +1402,9 @@ const translations = {
     preset_time: "Büroprofil Lichtdusche",
     preset_sun: "Reine Astrosteuerung",
     preset_mixed: "Gemischt (Überlappung in Berlin)",
+    preset_group_examples: "Beispiele",
+    preset_group_ha: "Home Assistant",
+    ha_schedule_invalid: "Der Zeitplan dieser Instanz ließ sich nicht laden.",
     load_file: "Datei laden",
     save_file: "Als Datei speichern",
     pdf_export: "PDF Export",
@@ -1673,6 +1679,9 @@ const translations = {
     preset_time: "Office profile light shower",
     preset_sun: "Sun only",
     preset_mixed: "Mixed (overlap in Berlin)",
+    preset_group_examples: "Examples",
+    preset_group_ha: "Home Assistant",
+    ha_schedule_invalid: "The schedule of this instance could not be loaded.",
     load_file: "Load File",
     save_file: "Save as File",
     pdf_export: "PDF Export",
@@ -1947,6 +1956,9 @@ const translations = {
     preset_time: "Perfil de oficina ducha de luz",
     preset_sun: "Solo control solar",
     preset_mixed: "Mixto (solapamiento en Berlín)",
+    preset_group_examples: "Ejemplos",
+    preset_group_ha: "Home Assistant",
+    ha_schedule_invalid: "No se pudo cargar el horario de esta instancia.",
     load_file: "Cargar Archivo",
     save_file: "Guardar como Archivo",
     pdf_export: "Exportar PDF",
@@ -2283,6 +2295,8 @@ const translations = {
       PRESET_NAMES.concat('none').forEach(name => {
         document.getElementById('opt-preset-' + name).textContent = t('preset_' + name);
       });
+      document.getElementById('preset-group-examples').label = t('preset_group_examples');
+      renderHaSchedules();
       document.getElementById('loadFileBtn').textContent = t('load_file');
       document.getElementById('downloadJsonBtn').textContent = t('save_file');
       document.getElementById('downloadPdfBtn').textContent = t('pdf_export');
@@ -2398,6 +2412,64 @@ const translations = {
         }
       } catch (e) { /* cross-origin or not inside HA */ }
       return null;
+    }
+
+    // ---- Schedules of the Home Assistant instances --------------------------
+    //
+    // Opened as panel inside Home Assistant, the web app reads the active
+    // schedule of every Keyframe Scheduler instance (websocket command
+    // keyframe_scheduler/schedules, through the frontend's own connection —
+    // no token needed) and offers them in the example list. Outside HA the
+    // list keeps the examples only.
+
+    let haSchedules = [];   // [{ entry_id, title, schedule }]
+
+    function haFrontend() {
+      try {
+        return window.parent !== window && window.parent.document.querySelector('home-assistant')?.hass;
+      } catch (e) { return null; }   // cross-origin or not inside HA
+    }
+
+    async function loadHaSchedules() {
+      const hass = haFrontend();
+      if (!hass || typeof hass.callWS !== 'function') return;
+      try {
+        const result = await hass.callWS({ type: 'keyframe_scheduler/schedules' });
+        haSchedules = Array.isArray(result?.schedules) ? result.schedules : [];
+      } catch (e) {
+        console.warn('Keyframe Scheduler: schedules of the instances not available', e);
+        haSchedules = [];
+      }
+      renderHaSchedules();
+    }
+
+    function renderHaSchedules() {
+      const select = document.getElementById('presetSelect');
+      let group = document.getElementById('preset-group-ha');
+      if (!haSchedules.length) {
+        if (group) group.remove();
+        return;
+      }
+      if (!group) {
+        group = document.createElement('optgroup');
+        group.id = 'preset-group-ha';
+        select.appendChild(group);
+      }
+      group.label = t('preset_group_ha');
+      group.replaceChildren(...haSchedules.map((s, index) => {
+        const option = document.createElement('option');
+        option.value = 'ha:' + index;
+        const name = s.schedule?.name;
+        option.textContent = name && name !== s.title ? `${s.title} – ${name}` : s.title;
+        return option;
+      }));
+    }
+
+    function loadHaSchedule(index) {
+      const entry = haSchedules[index];
+      if (!entry || !applyImportedJson(entry.schedule)) {
+        alert(t('ha_schedule_invalid'));
+      }
     }
 
     function setLocation(loc) {
@@ -5395,9 +5467,13 @@ const translations = {
     document.getElementById('addKeyframeBtn').addEventListener('click', addKeyframe);
     document.getElementById('sortByTimeBtn').addEventListener('click', sortKeyframesByTime);
     document.getElementById('presetSelect').addEventListener('change', e => {
-      loadPreset(e.target.value);
+      const value = e.target.value;
+      if (value.startsWith('ha:')) loadHaSchedule(+value.slice(3));
+      else loadPreset(value);
       e.target.value = '';   // back to the placeholder, so the same example can be loaded again
     });
+    // The instances' schedules may have changed since the page was opened
+    document.getElementById('presetSelect').addEventListener('focus', loadHaSchedules);
     document.getElementById('loadFileBtn').addEventListener('click', loadFileTop);
     document.getElementById('fileInputTop').addEventListener('change', handleFileImport);
     document.getElementById('downloadJsonBtn').addEventListener('click', downloadJson);
@@ -5451,6 +5527,7 @@ const translations = {
     setupYearView();
     setupBoundsTip();
     loadState();
+    loadHaSchedules();   // inside Home Assistant: the instances' schedules in the example list
     setLanguage(currentLang);  // Initialize i18n
     setupThemeControls();
   </script>

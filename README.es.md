@@ -161,6 +161,8 @@ En cuanto se crea la primera instancia (paso 1), **Keyframe Scheduler** aparece 
 
 Idiomas disponibles: DE / EN / ES
 
+Abierta desde la barra lateral, la lista de ejemplos ofrece también los **horarios de tus instancias** (grupo *Home Assistant*): elige uno para cargarlo y editarlo, y guárdalo de nuevo con *Configurar* o `set_schedule`.
+
 ### Exportación para PICO lightnode
 
 **PICO DailyScheduler** (Exportar e importar) genera el behavior `DAILYSCHEDULER` para el `setup.json` de un PICO lightnode: pégalo en los `behaviors` de un target con space `TC`. Targets, behaviors de ajuste/override y destinations permanecen en el setup; coordenadas y zona horaria vienen de la configuración del PICO (`pico.latitude` / `pico.longitude`).

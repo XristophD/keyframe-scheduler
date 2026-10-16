@@ -13,6 +13,7 @@
 - Light groups: the members share one timer, and when all of them are on and get the same command (same model, same curve) it goes out as one call to the group entity — a Hue room or Zigbee group changes all lamps at the same moment instead of one after the other. Members with different capabilities, or a group that is only partly on, still get a command each
 
 #### Fixed
+- A schedule set with `set_schedule` / `upload_from_file` lasted only until the next restart when the instance also had a schedule in its options (the options' schedule won at start-up). The options are kept in step now, without reloading the instance
 - Hue rooms / zones: lamps switched on through the room with a transition stayed at 6-12 % instead of the schedule's value (measured on a live installation: the same command without transition, or per lamp, was correct). Hue rooms now always get one command per lamp, and `turn_on` / `toggle` switch on without a fade by default (`transition` stays available)
 - Hue rooms / zones were never expanded into their lamps: they report their members as a set (not a list), which the group expansion did not accept — every command went to the room. Any collection of entity ids is accepted now (verified on a live installation)
 - Light groups whose members are reported only after start-up (a Hue room loads after the bridge) or change later are expanded again (on a schedule tick, a group state change, or `turn_on`); before, such a group stayed controlled as a whole. The follow switch's `members` attribute shows the expanded members

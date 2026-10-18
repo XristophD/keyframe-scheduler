@@ -5,7 +5,7 @@
 ### [Unreleased]
 
 #### Added
-- Web app (opened as panel in Home Assistant): the example list also offers the active schedule of every instance (group "Home Assistant") — load it to edit it. New websocket command `keyframe_scheduler/schedules`; outside Home Assistant the list keeps the examples only
+- Web app (opened as panel in Home Assistant): the example list also offers the active schedule of every instance (group "Home Assistant") — load it to edit it. New websocket command `keyframe_scheduler/schedules`; outside Home Assistant the list keeps the examples only. The list is now called "Load schedule …" (was "Load example …"), the instances come first
 - Web app: **Save into instance** (Export & Import, inside Home Assistant): writes the schedule being edited into a chosen instance — validated by the integration, active at once, kept across restarts. New admin-only websocket command `keyframe_scheduler/save_schedule`
 - Services `keyframe_scheduler.turn_on` and `keyframe_scheduler.toggle`: switch lights on with the schedule's current values, so they come on right instead of with their stored state and a visible correction a second later (e.g. a wall button automation with `light.toggle`). Per light: kelvin clamped to its range, brightness only without colour temperature; a group whose members get the same command is switched in one call (Hue room / Zigbee group: all at once); a paused light follows again; lights no instance controls are switched normally
 

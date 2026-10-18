@@ -525,8 +525,8 @@
       <div class="btn-row">
         <button class="lkl-btn is-primary" id="addKeyframeBtn">Keyframe hinzufügen</button>
         <button class="lkl-btn" id="sortByTimeBtn">Nach Zeit sortieren</button>
-        <select class="lkl-select preset-select" id="presetSelect" aria-label="Beispiel laden">
-          <option value="" id="opt-preset-none">Beispiel laden …</option>
+        <select class="lkl-select preset-select" id="presetSelect" aria-label="Zeitplan laden">
+          <option value="" id="opt-preset-none">Zeitplan laden …</option>
           <optgroup id="preset-group-examples" label="Beispiele">
             <option value="time" id="opt-preset-time">Büroprofil Lichtdusche</option>
             <option value="sun" id="opt-preset-sun">Reine Astrosteuerung</option>
@@ -1404,7 +1404,7 @@ const translations = {
     // Buttons
     add_keyframe: "Keyframe hinzufügen",
     sort_by_time: "Nach Zeit sortieren",
-    preset_none: "Beispiel laden …",
+    preset_none: "Zeitplan laden …",
     preset_time: "Büroprofil Lichtdusche",
     preset_sun: "Reine Astrosteuerung",
     preset_mixed: "Gemischt (Überlappung in Berlin)",
@@ -1686,7 +1686,7 @@ const translations = {
     // Buttons
     add_keyframe: "Add Keyframe",
     sort_by_time: "Sort by Time",
-    preset_none: "Load example …",
+    preset_none: "Load schedule …",
     preset_time: "Office profile light shower",
     preset_sun: "Sun only",
     preset_mixed: "Mixed (overlap in Berlin)",
@@ -1968,7 +1968,7 @@ const translations = {
     // Buttons
     add_keyframe: "Añadir Keyframe",
     sort_by_time: "Ordenar por Tiempo",
-    preset_none: "Cargar ejemplo …",
+    preset_none: "Cargar horario …",
     preset_time: "Perfil de oficina ducha de luz",
     preset_sun: "Solo control solar",
     preset_mixed: "Mixto (solapamiento en Berlín)",
@@ -2317,6 +2317,7 @@ const translations = {
         document.getElementById('opt-preset-' + name).textContent = t('preset_' + name);
       });
       document.getElementById('preset-group-examples').label = t('preset_group_examples');
+      document.getElementById('presetSelect').setAttribute('aria-label', t('preset_none').replace(/\s*…$/, ''));
       renderHaSchedules();
       document.getElementById('loadFileBtn').textContent = t('load_file');
       document.getElementById('downloadJsonBtn').textContent = t('save_file');
@@ -2476,7 +2477,7 @@ const translations = {
       if (!group) {
         group = document.createElement('optgroup');
         group.id = 'preset-group-ha';
-        select.appendChild(group);
+        select.insertBefore(group, document.getElementById('preset-group-examples'));
       }
       group.label = t('preset_group_ha');
       group.replaceChildren(...haSchedules.map((s, index) => {

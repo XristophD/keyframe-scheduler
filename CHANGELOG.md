@@ -5,12 +5,15 @@
 ### [Unreleased]
 
 #### Added
+- Web app (opened as panel in Home Assistant): the example list also offers the active schedule of every instance (group "Home Assistant") — load it to edit it. New websocket command `keyframe_scheduler/schedules`; outside Home Assistant the list keeps the examples only. The list is now called "Load schedule …" (was "Load example …"), the instances come first
+- Web app: **Save into instance** (Export & Import, inside Home Assistant): writes the schedule being edited into a chosen instance — validated by the integration, active at once, kept across restarts. New admin-only websocket command `keyframe_scheduler/save_schedule`
 - Services `keyframe_scheduler.turn_on` and `keyframe_scheduler.toggle`: switch lights on with the schedule's current values, so they come on right instead of with their stored state and a visible correction a second later (e.g. a wall button automation with `light.toggle`). Per light: kelvin clamped to its range, brightness only without colour temperature; a group whose members get the same command is switched in one call (Hue room / Zigbee group: all at once); a paused light follows again; lights no instance controls are switched normally
 
 #### Changed
 - Light groups: the members share one timer, and when all of them are on and get the same command (same model, same curve) it goes out as one call to the group entity — a Hue room or Zigbee group changes all lamps at the same moment instead of one after the other. Members with different capabilities, or a group that is only partly on, still get a command each
 
 #### Fixed
+- A schedule set with `set_schedule` / `upload_from_file` lasted only until the next restart when the instance also had a schedule in its options (the options' schedule won at start-up). The options are kept in step now, without reloading the instance
 - Hue rooms / zones: lamps switched on through the room with a transition stayed at 6-12 % instead of the schedule's value (measured on a live installation: the same command without transition, or per lamp, was correct). Hue rooms now always get one command per lamp, and `turn_on` / `toggle` switch on without a fade by default (`transition` stays available)
 - Hue rooms / zones were never expanded into their lamps: they report their members as a set (not a list), which the group expansion did not accept — every command went to the room. Any collection of entity ids is accepted now (verified on a live installation)
 - Light groups whose members are reported only after start-up (a Hue room loads after the bridge) or change later are expanded again (on a schedule tick, a group state change, or `turn_on`); before, such a group stayed controlled as a whole. The follow switch's `members` attribute shows the expanded members

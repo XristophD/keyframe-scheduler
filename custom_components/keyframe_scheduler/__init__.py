@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from homeassistant.components import frontend
+from homeassistant.components import frontend, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
@@ -540,6 +540,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     _async_register_services(hass)
+    _async_register_websocket(hass)
 
     # Reload when options change (lights, types, resume mode, schedule)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -560,6 +561,16 @@ async def _async_replace_schedule(hass: HomeAssistant, entry_id: str, schedule_o
 
     store = hass.data[DOMAIN]["store"]
     await store.async_set(entry_id, schedule_obj)
+
+    # The options' schedule wins at every start (async_setup_entry) — keep it
+    # in step, or the new schedule would only last until the next restart.
+    # Saving the options must not reload the instance: it is updated in place.
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is not None and entry.options.get("schedule_json"):
+        schedule_json = json.dumps(schedule_obj, ensure_ascii=False, indent=2)
+        if schedule_json != entry.options["schedule_json"]:   # unchanged: no update, no listener call
+            hass.data[DOMAIN].setdefault("skip_reload", set()).add(entry_id)
+            hass.config_entries.async_update_entry(entry, options={**entry.options, "schedule_json": schedule_json})
 
     if entry_id in hass.data[DOMAIN]:
         data = hass.data[DOMAIN][entry_id]
@@ -584,6 +595,55 @@ def _controlled_entities(hass: HomeAssistant, call: ServiceCall):
         for light_id in controller.lights:
             if not wanted or light_id in wanted:
                 yield controller, light_id
+
+
+@websocket_api.websocket_command({"type": "keyframe_scheduler/schedules"})
+@websocket_api.async_response
+async def _ws_schedules(hass: HomeAssistant, connection, msg: Dict[str, Any]) -> None:
+    """The active schedule of every instance, for the web app's example list:
+    {"schedules": [{"entry_id", "title", "schedule"}]}."""
+    store = hass.data.get(DOMAIN, {}).get("store")
+    schedules = []
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        schedule = data.get("schedule") if isinstance(data, dict) else None
+        if not schedule and store is not None:
+            schedule = await store.async_get(entry.entry_id)
+        if schedule:
+            schedules.append({"entry_id": entry.entry_id, "title": entry.title, "schedule": schedule})
+    connection.send_result(msg["id"], {"schedules": schedules})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    "type": "keyframe_scheduler/save_schedule",
+    "entry_id": str,
+    "schedule": dict,
+})
+@websocket_api.async_response
+async def _ws_save_schedule(hass: HomeAssistant, connection, msg: Dict[str, Any]) -> None:
+    """Save a schedule from the web app into an instance — validated, active
+    at once and kept across restarts (admins only)."""
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(msg["id"], "not_found", "Unknown Keyframe Scheduler instance")
+        return
+    try:
+        await _async_replace_schedule(hass, entry.entry_id, msg["schedule"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_schedule", str(err))
+        return
+    _LOGGER.info("Schedule saved from the web app for %s", entry.title)
+    connection.send_result(msg["id"], {"entry_id": entry.entry_id, "title": entry.title})
+
+
+def _async_register_websocket(hass: HomeAssistant) -> None:
+    """Register the web app's websocket commands once."""
+    if hass.data[DOMAIN].get("ws_registered"):
+        return
+    websocket_api.async_register_command(hass, _ws_schedules)
+    websocket_api.async_register_command(hass, _ws_save_schedule)
+    hass.data[DOMAIN]["ws_registered"] = True
 
 
 def _async_register_services(hass: HomeAssistant) -> None:
@@ -710,7 +770,12 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload integration when options are changed."""
+    """Reload integration when options are changed (not when only a new
+    schedule was written back, see _async_replace_schedule)."""
+    skip = hass.data.get(DOMAIN, {}).get("skip_reload", set())
+    if entry.entry_id in skip:
+        skip.discard(entry.entry_id)
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -728,7 +793,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id, None)
 
         # Remove panel when the last config entry is removed
-        _meta_keys = {"store", "static_path_registered", "panel_registered"}
+        _meta_keys = {"store", "static_path_registered", "panel_registered", "ws_registered", "skip_reload"}
         remaining_entries = [k for k in hass.data[DOMAIN] if k not in _meta_keys]
         if not remaining_entries and hass.data[DOMAIN].pop("panel_registered", False):
             try:

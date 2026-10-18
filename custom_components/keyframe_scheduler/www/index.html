@@ -525,11 +525,14 @@
       <div class="btn-row">
         <button class="lkl-btn is-primary" id="addKeyframeBtn">Keyframe hinzufügen</button>
         <button class="lkl-btn" id="sortByTimeBtn">Nach Zeit sortieren</button>
-        <select class="lkl-select preset-select" id="presetSelect" aria-label="Beispiel laden">
-          <option value="" id="opt-preset-none">Beispiel laden …</option>
-          <option value="time" id="opt-preset-time">Büroprofil Lichtdusche</option>
-          <option value="sun" id="opt-preset-sun">Reine Astrosteuerung</option>
-          <option value="mixed" id="opt-preset-mixed">Gemischt (Überlappung in Berlin)</option>
+        <select class="lkl-select preset-select" id="presetSelect" aria-label="Zeitplan laden">
+          <option value="" id="opt-preset-none">Zeitplan laden …</option>
+          <optgroup id="preset-group-examples" label="Beispiele">
+            <option value="time" id="opt-preset-time">Büroprofil Lichtdusche</option>
+            <option value="sun" id="opt-preset-sun">Reine Astrosteuerung</option>
+            <option value="mixed" id="opt-preset-mixed">Gemischt (Überlappung in Berlin)</option>
+          </optgroup>
+          <!-- "Home Assistant" group with the instances' schedules: renderHaSchedules() -->
         </select>
         <button class="lkl-btn" id="loadFileBtn">Datei laden</button>
       </div>
@@ -624,6 +627,12 @@
         <button class="lkl-btn is-primary" id="downloadJsonBtn">Als Datei speichern</button>
         <button class="lkl-btn" id="downloadPdfBtn">PDF Export</button>
         <button class="lkl-btn" id="downloadPicoBtn">PICO DailyScheduler</button>
+      </div>
+      <!-- Inside Home Assistant only: save straight into an instance -->
+      <div class="btn-row spaced" id="haSaveRow" hidden>
+        <label class="control-group-label" for="haSaveTarget" id="ha-save-label">In Instanz speichern</label>
+        <select class="lkl-select" id="haSaveTarget"></select>
+        <button class="lkl-btn" id="haSaveBtn">Speichern</button>
       </div>
       <input type="file" id="fileInput" accept=".json" hidden>
 
@@ -1395,10 +1404,18 @@ const translations = {
     // Buttons
     add_keyframe: "Keyframe hinzufügen",
     sort_by_time: "Nach Zeit sortieren",
-    preset_none: "Beispiel laden …",
+    preset_none: "Zeitplan laden …",
     preset_time: "Büroprofil Lichtdusche",
     preset_sun: "Reine Astrosteuerung",
     preset_mixed: "Gemischt (Überlappung in Berlin)",
+    preset_group_examples: "Beispiele",
+    preset_group_ha: "Home Assistant",
+    ha_schedule_invalid: "Der Zeitplan dieser Instanz ließ sich nicht laden.",
+    ha_save_label: "In Instanz speichern",
+    ha_save_btn: "Speichern",
+    ha_save_confirm: "Zeitplan in „{title}“ speichern? Er ersetzt den bisherigen Zeitplan dieser Instanz, die Leuchten folgen ihm sofort.",
+    ha_save_done: "Gespeichert – „{title}“ folgt jetzt diesem Zeitplan.",
+    ha_save_failed: "Speichern in „{title}“ fehlgeschlagen: {reason}",
     load_file: "Datei laden",
     save_file: "Als Datei speichern",
     pdf_export: "PDF Export",
@@ -1669,10 +1686,18 @@ const translations = {
     // Buttons
     add_keyframe: "Add Keyframe",
     sort_by_time: "Sort by Time",
-    preset_none: "Load example …",
+    preset_none: "Load schedule …",
     preset_time: "Office profile light shower",
     preset_sun: "Sun only",
     preset_mixed: "Mixed (overlap in Berlin)",
+    preset_group_examples: "Examples",
+    preset_group_ha: "Home Assistant",
+    ha_schedule_invalid: "The schedule of this instance could not be loaded.",
+    ha_save_label: "Save into instance",
+    ha_save_btn: "Save",
+    ha_save_confirm: "Save the schedule into \"{title}\"? It replaces this instance's schedule and the lights follow it at once.",
+    ha_save_done: "Saved – \"{title}\" now follows this schedule.",
+    ha_save_failed: "Saving into \"{title}\" failed: {reason}",
     load_file: "Load File",
     save_file: "Save as File",
     pdf_export: "PDF Export",
@@ -1943,10 +1968,18 @@ const translations = {
     // Buttons
     add_keyframe: "Añadir Keyframe",
     sort_by_time: "Ordenar por Tiempo",
-    preset_none: "Cargar ejemplo …",
+    preset_none: "Cargar horario …",
     preset_time: "Perfil de oficina ducha de luz",
     preset_sun: "Solo control solar",
     preset_mixed: "Mixto (solapamiento en Berlín)",
+    preset_group_examples: "Ejemplos",
+    preset_group_ha: "Home Assistant",
+    ha_schedule_invalid: "No se pudo cargar el horario de esta instancia.",
+    ha_save_label: "Guardar en instancia",
+    ha_save_btn: "Guardar",
+    ha_save_confirm: "¿Guardar el horario en «{title}»? Sustituye el horario de esta instancia y las luces lo siguen de inmediato.",
+    ha_save_done: "Guardado: «{title}» sigue ahora este horario.",
+    ha_save_failed: "Error al guardar en «{title}»: {reason}",
     load_file: "Cargar Archivo",
     save_file: "Guardar como Archivo",
     pdf_export: "Exportar PDF",
@@ -2283,6 +2316,9 @@ const translations = {
       PRESET_NAMES.concat('none').forEach(name => {
         document.getElementById('opt-preset-' + name).textContent = t('preset_' + name);
       });
+      document.getElementById('preset-group-examples').label = t('preset_group_examples');
+      document.getElementById('presetSelect').setAttribute('aria-label', t('preset_none').replace(/\s*…$/, ''));
+      renderHaSchedules();
       document.getElementById('loadFileBtn').textContent = t('load_file');
       document.getElementById('downloadJsonBtn').textContent = t('save_file');
       document.getElementById('downloadPdfBtn').textContent = t('pdf_export');
@@ -2398,6 +2434,105 @@ const translations = {
         }
       } catch (e) { /* cross-origin or not inside HA */ }
       return null;
+    }
+
+    // ---- Schedules of the Home Assistant instances --------------------------
+    //
+    // Opened as panel inside Home Assistant, the web app reads the active
+    // schedule of every Keyframe Scheduler instance (websocket command
+    // keyframe_scheduler/schedules, through the frontend's own connection —
+    // no token needed) and offers them in the example list. Outside HA the
+    // list keeps the examples only.
+
+    let haSchedules = [];   // [{ entry_id, title, schedule }]
+    let haLoadedEntry = null;   // instance whose schedule was loaded last (default save target)
+
+    function haFrontend() {
+      try {
+        return window.parent !== window && window.parent.document.querySelector('home-assistant')?.hass;
+      } catch (e) { return null; }   // cross-origin or not inside HA
+    }
+
+    async function loadHaSchedules() {
+      const hass = haFrontend();
+      if (!hass || typeof hass.callWS !== 'function') return;
+      try {
+        const result = await hass.callWS({ type: 'keyframe_scheduler/schedules' });
+        haSchedules = Array.isArray(result?.schedules) ? result.schedules : [];
+      } catch (e) {
+        console.warn('Keyframe Scheduler: schedules of the instances not available', e);
+        haSchedules = [];
+      }
+      renderHaSchedules();
+    }
+
+    function renderHaSchedules() {
+      const select = document.getElementById('presetSelect');
+      let group = document.getElementById('preset-group-ha');
+      renderHaSaveTarget();
+      if (!haSchedules.length) {
+        if (group) group.remove();
+        return;
+      }
+      if (!group) {
+        group = document.createElement('optgroup');
+        group.id = 'preset-group-ha';
+        select.insertBefore(group, document.getElementById('preset-group-examples'));
+      }
+      group.label = t('preset_group_ha');
+      group.replaceChildren(...haSchedules.map((s, index) => {
+        const option = document.createElement('option');
+        option.value = 'ha:' + index;
+        const name = s.schedule?.name;
+        option.textContent = name && name !== s.title ? `${s.title} – ${name}` : s.title;
+        return option;
+      }));
+    }
+
+    function loadHaSchedule(index) {
+      const entry = haSchedules[index];
+      if (!entry || !applyImportedJson(entry.schedule)) {
+        alert(t('ha_schedule_invalid'));
+        return;
+      }
+      haLoadedEntry = entry.entry_id;
+      renderHaSaveTarget(entry.entry_id);
+    }
+
+    /** "Save into instance" row: one option per instance. Keeps the choice
+        made in it; `preferred` (the instance just loaded) overrides it. */
+    function renderHaSaveTarget(preferred) {
+      const row = document.getElementById('haSaveRow');
+      const target = document.getElementById('haSaveTarget');
+      row.hidden = !haSchedules.length;
+      const wanted = preferred || target.value || haLoadedEntry;
+      target.replaceChildren(...haSchedules.map(s => {
+        const option = document.createElement('option');
+        option.value = s.entry_id;
+        option.textContent = s.title;
+        return option;
+      }));
+      if (haSchedules.some(s => s.entry_id === wanted)) target.value = wanted;
+      document.getElementById('ha-save-label').textContent = t('ha_save_label');
+      document.getElementById('haSaveBtn').textContent = t('ha_save_btn');
+    }
+
+    /** Save the schedule being edited into the chosen instance: validated by
+        the integration, active at once, kept across restarts. */
+    async function saveToHa() {
+      const hass = haFrontend();
+      const entryId = document.getElementById('haSaveTarget').value;
+      const entry = haSchedules.find(s => s.entry_id === entryId);
+      if (!hass || !entry) return;
+      if (!confirm(t('ha_save_confirm').replace('{title}', entry.title))) return;
+      try {
+        await hass.callWS({ type: 'keyframe_scheduler/save_schedule', entry_id: entryId, schedule: generateHaJson() });
+        haLoadedEntry = entryId;
+        alert(t('ha_save_done').replace('{title}', entry.title));
+        await loadHaSchedules();
+      } catch (err) {
+        alert(t('ha_save_failed').replace('{title}', entry.title).replace('{reason}', err?.message || err?.code || String(err)));
+      }
     }
 
     function setLocation(loc) {
@@ -5395,9 +5530,14 @@ const translations = {
     document.getElementById('addKeyframeBtn').addEventListener('click', addKeyframe);
     document.getElementById('sortByTimeBtn').addEventListener('click', sortKeyframesByTime);
     document.getElementById('presetSelect').addEventListener('change', e => {
-      loadPreset(e.target.value);
+      const value = e.target.value;
+      if (value.startsWith('ha:')) loadHaSchedule(+value.slice(3));
+      else loadPreset(value);
       e.target.value = '';   // back to the placeholder, so the same example can be loaded again
     });
+    // The instances' schedules may have changed since the page was opened
+    document.getElementById('presetSelect').addEventListener('focus', loadHaSchedules);
+    document.getElementById('haSaveBtn').addEventListener('click', saveToHa);
     document.getElementById('loadFileBtn').addEventListener('click', loadFileTop);
     document.getElementById('fileInputTop').addEventListener('change', handleFileImport);
     document.getElementById('downloadJsonBtn').addEventListener('click', downloadJson);
@@ -5451,6 +5591,7 @@ const translations = {
     setupYearView();
     setupBoundsTip();
     loadState();
+    loadHaSchedules();   // inside Home Assistant: the instances' schedules in the example list
     setLanguage(currentLang);  // Initialize i18n
     setupThemeControls();
   </script>

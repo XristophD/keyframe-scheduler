@@ -161,6 +161,8 @@ Once the first instance has been created (step 1), **Keyframe Scheduler** appear
 
 Available languages: DE / EN / ES
 
+Opened from the sidebar, the example list also offers the **schedules of your instances** (group *Home Assistant*) — pick one to load and edit it, then **Save into instance** (Export & Import) writes it straight back: validated, active at once and kept across restarts (admins only).
+
 ### PICO lightnode export
 
 **PICO DailyScheduler** (Export & Import) generates the `DAILYSCHEDULER` behavior for a PICO lightnode `setup.json`: paste it into the `behaviors` of a target with space `TC`. Targets, adjust/override behaviors and destinations stay in the setup; latitude, longitude and time zone come from the PICO configuration (`pico.latitude` / `pico.longitude`).
